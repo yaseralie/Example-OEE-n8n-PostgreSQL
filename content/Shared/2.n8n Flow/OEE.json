@@ -1,0 +1,218 @@
+{
+  "name": "OEE",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ec06aef5-b6a3-482b-a84c-8c3d5d17f308",
+      "name": "When chat message received",
+      "webhookId": "fe33fc56-7b26-4c58-a523-773d78c4e364"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "Kamu adalah data analyst dan ahli perhitungan OEE.  \nGunakan hanya tool yang tersedia, jika ditanya data harus melakukan query.\n\nJangan tanya struktur tabel ke user,  \nJalankan Table_Schema otomatis jika perlu agar tidak salah field saat query,  \nSetelah itu langsung jalankan Execute_Query untuk ambil hasil,  \nJangan pernah keluarkan query, tapi berikan hasil akhir.  \n\n1. Untuk mengetahui struktur tabel, JANGAN tanya user.  \n   Jalankan tool Table_Schema secara langsung tanpa konfirmasi.  \n\n2. Untuk membaca data dari database, gunakan tool Execute_Query.  \n   Ini adalah satu-satunya cara untuk membaca data.  \n   Kamu HARUS menjalankan Execute_Query setiap kali ingin mengambil nilai atau hasil akhir dari database.  \n\n3. Data OEE ada di tabel view_oee_date.  \n   - Saat query di table view_oee_date perlu grouping atau where, HARUS menggunakan id_machine, jangan machine_name atau machine_no.  \n   - Jika menggunakan machine_name atau machine_no, kamu HARUS JOIN ke machine_master berdasarkan id_machine.  \n   - Jika menggunakan fungsi agregasi (SUM, AVG, MAX, MIN, COUNT), pastikan menambahkan GROUP BY untuk kolom non-agregasi yang di-select, gunakan id_machine jika berdasarkan mesin.  \n   - Jika ditanya berdasarkan nama mesin, ambil nama mesinnya di machine_master, lakukan join berdasarkan id_machine.  \n\n4. Saat gunakan tool Execute_Query:  \n   - Jangan satukan klausa WHERE ke dalam 'table_name'.  \n   - Output harus memiliki key 'condition' untuk bagian WHERE, dan 'table_name' hanya berisi nama tabel dan JOIN saja.  \n   - Contoh output JSON:  \n     {  \n       \"fields\": \"COUNT(DISTINCT date)\",  \n       \"table_name\": \"view_oee_date JOIN machine_master ON view_oee_date.id_machine = machine_master.id_machine\",  \n       \"condition\": \"machine_master.machine_name = 'MACHINING-03' AND EXTRACT(YEAR FROM date) = 2025 AND EXTRACT(MONTH FROM date) = 7\",  \n       \"group_by\": \"\"  \n     }  \n\n5. Data id_machine, machine_name, machine_no ada di tabel machine_master.  \n\n6. Jika ingin mengambil data dari tabel view_oee_date, trans_operation, atau trans_stop:  \n   - Pertama, ambil id_machine dari tabel machine_master sesuai machine_name atau machine_no.  \n   - Setelah itu, gunakan id_machine tersebut untuk query ke tabel yang dimaksud.  \n   - Jika ingin melakukan group mesin, group berdasarkan id_machine.  \n   - loading_time dan stop_time satuannya menit.\n   - Untuk nilai actual output nama kolomnya qty_output\n   - Untuk nilai quantity defect nama kolomnya qty_defect\n\n7. Saat menjawab pertanyaan user:  \n   - Jika tidak tahu kolom tabel, langsung jalankan Table_Schema.  \n   - Setelah tahu kolom, langsung jalankan Execute_Query.  \n   - Jangan pernah menanyakan struktur tabel atau query ke user.  \n\n8. Jika ada fungsi agregasi di fields, wajib sertakan kolom non-agregasi di group_by.\n\n9. Jika ada filter berdasarkan nama mesin, gunakan join ke machine_master dan taruh filter di condition menggunakan machine_master.machine_name.\n\n10. Untuk data detail output ada di table trans_output biasanya untuk mengambil total output berdasarkan jam, kolom waktunya adalah time bukan date, dan jumlahnya di kolom qty.\n\n11. Untuk data detail defect ada di table trans_ng biasanya untuk mengambil total defect berdasarkan jam, kolom waktunya adalah time bukan date, dan jumlahnya di kolom qty.\n\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.9,
+      "position": [
+        220,
+        0
+      ],
+      "id": "ca0ea2f8-916c-4c50-8f24-18f89aeeec60",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        200,
+        240
+      ],
+      "id": "cc0d1cbf-5780-47ff-a6e2-e8f5179ef33a",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Read tables's schema",
+        "operation": "executeQuery",
+        "query": "SELECT column_name, data_type from information_schema.columns WHERE table_name=$1",
+        "options": {
+          "queryReplacement": "={{ $fromAI('table_name','name of table to select') }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        240
+      ],
+      "id": "6a987c21-a1e3-4a8f-bda9-037696ab9564",
+      "name": "Table Schema",
+      "credentials": {
+        "postgres": {
+          "id": "oDNfNOR7v9j2GiLY",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Execute Query",
+        "operation": "executeQuery",
+        "query": "SELECT {{ $fromAI(\"fields\") }}\nFROM {{ $fromAI('table_name','name of table to select') }}\n{{ $fromAI(\"condition\") && $fromAI(\"condition\").trim() ? \"WHERE \" + $fromAI(\"condition\") : \"\" }}\n{{ $fromAI(\"group_by\") && $fromAI(\"group_by\").trim() ? \"GROUP BY \" + $fromAI(\"group_by\") : \"\" }}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.6,
+      "position": [
+        620,
+        240
+      ],
+      "id": "4fdf6bb0-68a2-44ae-9d1f-07ce174f02e4",
+      "name": "Execute Query",
+      "credentials": {
+        "postgres": {
+          "id": "oDNfNOR7v9j2GiLY",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        40,
+        240
+      ],
+      "id": "31bcc7b9-a391-4f09-8560-61c80f88f9fc",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ZWnQyKTH8KQCend4",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Get List Tables",
+        "operation": "executeQuery",
+        "query": "SELECT table_name from information_schema.tables where table_schema = 'public'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.6,
+      "position": [
+        340,
+        240
+      ],
+      "id": "8e093f29-c388-43c8-b87c-ea54fb6382a5",
+      "name": "Table List",
+      "credentials": {
+        "postgres": {
+          "id": "oDNfNOR7v9j2GiLY",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Table Schema": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Query": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Table List": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "084cfa7a-8699-4d19-9811-35468912c897",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3783aac141e98089f6124dd248d29ba24014c1256039f6054362300edcf5673f"
+  },
+  "id": "2rQpehnWB9w0Rd3r",
+  "tags": []
+}
